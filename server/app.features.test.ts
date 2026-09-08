@@ -37,4 +37,13 @@ describe("Gwagwalada Connect feature contracts", () => {
     const caller = appRouter.createCaller(createContext());
     await expect(caller.community.createPost({ body: "A safe civic update" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
+
+  it("filters people and returns an accepted-contact messaging contract", async () => {
+    const caller = appRouter.createCaller(createContext({ id: 1, openId: "sample-user", email: "sample@example.com", name: "Sample User", loginMethod: "manus", role: "user", createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date() }));
+    const people = await caller.social.people({ search: "zuba" });
+    const access = await caller.social.canMessage({ userId: "person-2" });
+    expect(people).toHaveLength(1);
+    expect(access.allowed).toBe(true);
+    expect(access.relationship).toBe("accepted");
+  });
 });

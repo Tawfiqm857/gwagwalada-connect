@@ -73,6 +73,21 @@ export const appRouter = router({
     completeModule: protectedProcedure.input(z.object({ courseId: z.string(), moduleId: z.string() })).mutation(({ input }) => ({ completed: true, ...input })),
     certificate: protectedProcedure.input(z.object({ courseId: z.string() })).query(({ input, ctx }) => ({ eligible: true, courseId: input.courseId, holder: ctx.user.name ?? "Community learner", issuedAt: Date.now() })),
   }),
+  social: router({
+    people: publicProcedure.input(z.object({ search: z.string().optional() }).optional()).query(({ input }) => {
+      const directory = [
+        { id: "person-1", name: "Aisha Bello", role: "GEM Executive", area: "Tudun Wada", mutuals: 12 },
+        { id: "person-2", name: "Sadiq Ibrahim", role: "Verified Resident", area: "Zuba", mutuals: 8 },
+        { id: "person-3", name: "Naza Digital", role: "Verified Business", area: "Gwagwalada Central", mutuals: 4 },
+        { id: "person-4", name: "Maryam Yusuf", role: "Verified Resident", area: "Dagiri", mutuals: 16 },
+      ];
+      const search = input?.search?.toLowerCase() ?? "";
+      return directory.filter((person) => !search || `${person.name} ${person.role} ${person.area}`.toLowerCase().includes(search));
+    }),
+    follow: protectedProcedure.input(z.object({ userId: z.string(), follow: z.boolean() })).mutation(({ input, ctx }) => ({ ...input, followerId: ctx.user.id, following: input.follow })),
+    friendRequest: protectedProcedure.input(z.object({ userId: z.string(), action: z.enum(["send", "accept", "decline", "cancel"]) })).mutation(({ input, ctx }) => ({ ...input, requesterId: ctx.user.id, status: input.action === "accept" ? "accepted" : input.action === "decline" || input.action === "cancel" ? "declined" : "pending" })),
+    canMessage: protectedProcedure.input(z.object({ userId: z.string() })).query(({ input, ctx }) => ({ userId: input.userId, requesterId: ctx.user.id, allowed: true, relationship: "accepted" as const })),
+  }),
   messaging: router({
     threads: protectedProcedure.query(() => mockConversations),
     notifications: protectedProcedure.query(() => mockNotifications),

@@ -46,11 +46,14 @@ import {
   Store,
   Upload,
   Users,
+  UserCheck,
+  UserPlus,
+  UserRoundSearch,
   WalletCards,
   X,
 } from "lucide-react";
 
-type View = "home" | "marketplace" | "classroom" | "gallery" | "messages";
+type View = "home" | "marketplace" | "classroom" | "gallery" | "messages" | "people";
 
 type Post = {
   id: number;
@@ -78,6 +81,7 @@ const navItems: { id: View; label: string; icon: typeof Compass }[] = [
   { id: "classroom", label: "GEM classroom", icon: GraduationCap },
   { id: "gallery", label: "Movement gallery", icon: Camera },
   { id: "messages", label: "Messages", icon: MessageCircle },
+  { id: "people", label: "Find people", icon: UserRoundSearch },
 ];
 
 const initialPosts: Post[] = [
@@ -146,9 +150,17 @@ const threads = [
   { name: "Sadiq Ibrahim", initials: "SI", preview: "Can you share the task details?", time: "Mon", unread: 0, tone: "sage" },
 ];
 
+const people = [
+  { id: "person-1", name: "Aisha Bello", initials: "AB", role: "GEM Executive", area: "Tudun Wada", bio: "Community organiser helping youth-led projects move from idea to impact.", tone: "peach", mutuals: 12 },
+  { id: "person-2", name: "Sadiq Ibrahim", initials: "SI", role: "Verified Resident", area: "Zuba", bio: "Builder, task board regular, and weekend football organiser.", tone: "sage", mutuals: 8 },
+  { id: "person-3", name: "Naza Digital", initials: "ND", role: "Verified Business", area: "Gwagwalada Central", bio: "Helping local businesses get discovered online through practical digital tools.", tone: "blue", mutuals: 4 },
+  { id: "person-4", name: "Maryam Yusuf", initials: "MY", role: "Verified Resident", area: "Dagiri", bio: "Data annotator and GEM classroom peer mentor.", tone: "peach", mutuals: 16 },
+];
+
 type Listing = (typeof listings)[number];
 type Course = (typeof courses)[number];
 type Thread = (typeof threads)[number];
+type Person = (typeof people)[number];
 
 const notifications = [
   { icon: Heart, title: "Aisha Bello liked your update", time: "8 min ago", tone: "peach" },
@@ -178,6 +190,8 @@ export default function Home() {
   const [messageDraft, setMessageDraft] = useState("");
   const [courseProgress, setCourseProgress] = useState<Record<string, number>>({});
   const [courseModal, setCourseModal] = useState<(typeof courses)[number] | null>(null);
+  const [followedPeople, setFollowedPeople] = useState<string[]>([]);
+  const [friendRequests, setFriendRequests] = useState<Record<string, "none" | "pending" | "accepted">>({ "person-2": "pending" });
 
   const filteredListings = useMemo(() => listings.filter((item) => {
     const matchesFilter = marketFilter === "All" || item.category === marketFilter;
@@ -201,6 +215,14 @@ export default function Home() {
     if (!messageDraft.trim()) return;
     setMessageDraft("");
     toast.success(`Message sent to ${selectedThread.name}`);
+  };
+  const toggleFollow = (personId: string, name: string) => {
+    setFollowedPeople((current) => current.includes(personId) ? current.filter((id) => id !== personId) : [...current, personId]);
+    toast.success(followedPeople.includes(personId) ? `You unfollowed ${name}.` : `You’re now following ${name}.`);
+  };
+  const updateFriendRequest = (personId: string, next: "pending" | "accepted", name: string) => {
+    setFriendRequests((current) => ({ ...current, [personId]: next }));
+    toast.success(next === "accepted" ? `${name} is now a connection. You can message each other.` : `Friend request sent to ${name}.`);
   };
 
   const startCourse = (course: (typeof courses)[number]) => {
@@ -232,7 +254,7 @@ export default function Home() {
           <div className="sidebar-section"><span className="sidebar-label">Your activity</span><button className="sidebar-link" onClick={() => toast.info("Saved items are coming soon.")}><WalletCards size={18} /><span>Saved items</span></button><button className="sidebar-link" onClick={() => toast.info("Your profile editor is coming soon.")}><CircleUserRound size={18} /><span>My profile</span></button><button className="sidebar-link" onClick={() => toast.info("Settings are coming soon.")}><Settings2 size={18} /><span>Settings</span></button></div>
           <div className="sidebar-spacer" />
           <div className="connect-card"><div className="connect-orbit"><Sparkles size={18} /></div><strong>Build a stronger Gwagwalada</strong><p>Share what you know. Support a local builder. Verify what matters.</p><button onClick={() => setShowComposer(true)}>Create a post <ArrowRight size={14} /></button></div>
-          <div className="sidebar-footer"><div className="footer-user"><Avatar initials={user?.name?.slice(0, 2).toUpperCase() ?? "AO"} tone="peach" size="sm" /><div><strong>{user?.name ?? "Amina Okafor"}</strong><small>Gwagwalada, FCT</small></div></div>{isAuthenticated ? <button className="logout-button" onClick={() => logout()} title="Log out"><LogOut size={16} /></button> : <button className="logout-button" onClick={() => startLogin()} title="Sign in"><LogIn size={16} /></button>}</div>
+          <div className="sidebar-footer"><div className="footer-user"><Avatar initials={user?.name?.slice(0, 2).toUpperCase() ?? "AO"} tone="peach" size="sm" /><div><strong>{user?.name ?? "Amina Okafor"}</strong><small>Gwagwalada, FCT</small></div></div>{isAuthenticated ? <button className="logout-button" onClick={() => logout()} title="Log out"><LogOut size={16} /></button> : <button className="logout-button" onClick={() => { window.location.href = "/auth"; }} title="Sign in"><LogIn size={16} /></button>}</div>
         </aside>
 
         <main className="main-content">
@@ -241,6 +263,7 @@ export default function Home() {
           {activeView === "classroom" && <ClassroomView courses={courses} courseProgress={courseProgress} onStart={startCourse} onToast={(message) => toast.info(message)} />}
           {activeView === "gallery" && <GalleryView onToast={(message) => toast.info(message)} />}
           {activeView === "messages" && <MessagesView selected={selectedThread} setSelected={setSelectedThread} draft={messageDraft} setDraft={setMessageDraft} onSend={sendMessage} />}
+          {activeView === "people" && <PeopleView followedPeople={followedPeople} friendRequests={friendRequests} onFollow={toggleFollow} onFriendRequest={updateFriendRequest} onMessage={(person) => { setSelectedThread({ name: person.name, initials: person.initials, preview: "New connection", time: "Now", unread: 0, tone: person.tone }); setActiveView("messages"); }} />}
         </main>
       </div>
 
@@ -275,6 +298,12 @@ function ClassroomView({ courses, courseProgress, onStart, onToast }: { courses:
 
 function GalleryView({ onToast }: { onToast: (message: string) => void }) {
   return <><section className="page-hero gallery-hero"><div><span className="eyebrow light-eyebrow">Proof in the open</span><h1>Movement gallery</h1><p>See what’s happening on the ground. Add your own evidence to the story.</p></div><Button onClick={() => onToast("Project verification form opened.")}><Upload size={16} /> Verify a project</Button></section><section className="verification-banner"><div className="verification-icon"><ShieldCheck size={24} /></div><div><span className="eyebrow">Civic project verification</span><h2>Turn claims into a public trail.</h2><p>Upload a field photo, choose your visibility, and help neighbours see what is completed, what is in progress, and what needs attention.</p></div><div className="verification-stats"><div><strong>38</strong><span>projects tracked</span></div><div><strong>91</strong><span>field updates</span></div><div><strong>14</strong><span>areas covered</span></div></div></section><div className="gallery-grid"><div className="gallery-feature"><img src={aerialImage} alt="Aerial view of Gwagwalada" /><div className="gallery-overlay"><span className="gallery-label">Area overview</span><h2>Gwagwalada, from the ground up.</h2><p>Residents are building a shared record of the places they call home.</p><button onClick={() => onToast("Opening the area story...")}>Explore story <ArrowRight size={15} /></button></div></div>{[projectImage, marketImage, classroomImage].map((image, index) => <div className="gallery-tile" key={image}><img src={image} alt="GEM community initiative" /><div><span>{["Community clean-up", "Local commerce", "Youth learning"][index]}</span><strong>{["87 volunteers · 08 Sep", "Dagiri market · 05 Sep", "Skills lab · 02 Sep"][index]}</strong></div></div>)}</div><section className="project-trail"><div className="section-heading"><div><span className="eyebrow">Open accountability</span><h2>Project trail</h2></div><button className="card-link" onClick={() => onToast("All projects loaded.")}>See all projects <ArrowRight size={14} /></button></div><div className="trail-list">{[{ name: "Kuje Road borehole rehabilitation", area: "Kuje Road", status: "In progress", percent: 80, color: "peach" }, { name: "Tudun Wada youth hub", area: "Tudun Wada", status: "Verified complete", percent: 100, color: "sage" }, { name: "Dagiri drainage clearance", area: "Dagiri", status: "Verified complete", percent: 100, color: "blue" }].map((project) => <div className="trail-row" key={project.name}><div className={`trail-status ${project.color}`}><CheckCircle2 size={17} /></div><div className="trail-copy"><strong>{project.name}</strong><span><MapPin size={12} /> {project.area} · Updated today</span></div><div className="trail-progress"><Progress value={project.percent} /><span>{project.status}</span></div><ChevronRight size={17} className="muted-icon" /></div>)}</div></section></>;
+}
+
+function PeopleView({ followedPeople, friendRequests, onFollow, onFriendRequest, onMessage }: { followedPeople: string[]; friendRequests: Record<string, "none" | "pending" | "accepted">; onFollow: (personId: string, name: string) => void; onFriendRequest: (personId: string, next: "pending" | "accepted", name: string) => void; onMessage: (person: Person) => void }) {
+  const [query, setQuery] = useState("");
+  const filteredPeople = people.filter((person) => `${person.name} ${person.role} ${person.area}`.toLowerCase().includes(query.toLowerCase()));
+  return <><section className="people-hero"><div><span className="eyebrow light-eyebrow">Your community, closer</span><h1>Find your people</h1><p>Discover residents, builders, businesses, and GEM leaders you can learn from or work with.</p></div><div className="people-hero-stat"><Users size={20} /><strong>2,418</strong><span>people building together</span></div></section><div className="people-toolbar"><div className="people-search"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by name, role, or area" /></div><div className="people-toolbar-note"><UserCheck size={15} /> Mutual connections help keep this space trusted.</div></div><div className="people-section-heading"><div><span className="eyebrow">People worth knowing</span><h2>{filteredPeople.length} local profiles</h2></div><span className="people-request-note"><UserPlus size={14} /> {Object.values(friendRequests).filter((status) => status === "pending").length} request waiting</span></div><div className="people-grid">{filteredPeople.map((person) => { const requestState = friendRequests[person.id] ?? "none"; const isFollowing = followedPeople.includes(person.id); return <Card className="person-card" key={person.id}><div className="person-card-top"><Avatar initials={person.initials} tone={person.tone} size="lg" /><button className={`follow-quiet ${isFollowing ? "following" : ""}`} onClick={() => onFollow(person.id, person.name)}>{isFollowing ? <Check size={14} /> : <Plus size={14} />} {isFollowing ? "Following" : "Follow"}</button></div><div className="person-card-copy"><h3>{person.name} <ShieldCheck size={14} /></h3><StatusBadge tone={person.tone}>{person.role}</StatusBadge><span className="person-area"><MapPin size={12} /> {person.area}</span><p>{person.bio}</p><small><Users size={12} /> {person.mutuals} mutual connections</small></div><div className="person-card-actions">{requestState === "accepted" ? <Button onClick={() => onMessage(person)}><MessageCircle size={15} /> Message</Button> : requestState === "pending" ? <Button variant="outline" onClick={() => onFriendRequest(person.id, "accepted", person.name)}><UserCheck size={15} /> Accept request</Button> : <Button variant="outline" onClick={() => onFriendRequest(person.id, "pending", person.name)}><UserPlus size={15} /> Add connection</Button>}<button className="icon-button" onClick={() => toast.info(`Opening ${person.name}'s profile.`)}><ChevronRight size={16} /></button></div></Card>; })}</div></>;
 }
 
 function MessagesView({ selected, setSelected, draft, setDraft, onSend }: { selected: Thread; setSelected: (thread: Thread) => void; draft: string; setDraft: (value: string) => void; onSend: () => void }) {
