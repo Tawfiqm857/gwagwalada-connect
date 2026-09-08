@@ -30,4 +30,31 @@ describe("local account authentication", () => {
     expect(result.user.email).toBe(email);
     expect(cookies[0]).toMatch(/^gwagwalada_session=ey/);
   });
+
+  it("completes onboarding and refreshes the session profile", async () => {
+    const ctx = createContext();
+    ctx.user = {
+      id: 88001,
+      openId: `onboarding-${Date.now()}`,
+      name: "New Resident",
+      email: "new-resident@example.com",
+      loginMethod: "password",
+      passwordHash: null,
+      area: null,
+      bio: null,
+      interests: null,
+      onboardingCompleted: 0,
+      role: "user",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastSignedIn: new Date(),
+    };
+    const cookies: string[] = [];
+    ctx.res.cookie = ((name: string, value: string) => cookies.push(`${name}=${value}`)) as TrpcContext["res"]["cookie"];
+    const result = await appRouter.createCaller(ctx).auth.completeOnboarding({ area: "Zuba", bio: "I want to help local businesses get online.", interests: ["Digital skills", "Local business"] });
+    expect(result.completed).toBe(true);
+    expect(result.user.onboardingCompleted).toBe(1);
+    expect(result.user.area).toBe("Zuba");
+    expect(cookies[0]).toMatch(/^gwagwalada_session=ey/);
+  });
 });

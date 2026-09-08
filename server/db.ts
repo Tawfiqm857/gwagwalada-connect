@@ -110,5 +110,17 @@ export async function createLocalUser(input: { openId: string; name: string; ema
   });
   return getUserByOpenId(input.openId);
 }
+export async function updateUserOnboarding(openId: string, input: { area: string; bio: string; interests: string[] }) {
+  const db = await getDb();
+  if (!db) return undefined;
+  await db.update(users).set({
+    area: input.area,
+    bio: input.bio,
+    interests: JSON.stringify(input.interests),
+    onboardingCompleted: 1,
+    updatedAt: new Date(),
+  }).where(eq(users.openId, openId));
+  return getUserByOpenId(openId);
+}
 
 // TODO: add feature queries here as your schema grows.

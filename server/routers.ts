@@ -12,8 +12,8 @@ import {
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { createFallbackAccount, createLocalSession, getFallbackAccount, hashPassword, normalizeEmail, publicUser, verifyPassword } from "./auth-local";
-import { createLocalUser, getUserByEmail } from "./db";
+import { createFallbackAccount, createLocalSession, getFallbackAccount, hashPassword, normalizeEmail, publicUser, updateFallbackProfile, verifyPassword } from "./auth-local";
+import { createLocalUser, getUserByEmail, updateUserOnboarding } from "./db";
 
 /**
  * Feature routers intentionally return mock data when the database is empty or
@@ -52,6 +52,14 @@ export const appRouter = router({
       const token = await createLocalSession(user);
       ctx.res.cookie("gwagwalada_session", token, { ...getSessionCookieOptions(ctx.req), maxAge: 30 * 24 * 60 * 60 * 1000 });
       return { user, loggedIn: true };
+    }),
+    completeOnboarding: protectedProcedure.input(z.object({ area: z.string().trim().min(2).max(120), bio: z.string().trim().min(10).max(500), interests: z.array(z.string().trim().min(2).max(40)).min(1).max(6) })).mutation(async ({ input, ctx }) => {
+      const databaseUser = await updateUserOnboarding(ctx.user.openId, input);
+      const fallbackUser = updateFallbackProfile(ctx.user.openId, input);
+      const user = databaseUser ?? (fallbackUser ? publicUser(fallbackUser) : { ...ctx.user, area: input.area, bio: input.bio, interests: JSON.stringify(input.interests), onboardingCompleted: 1 });
+      const token = await createLocalSession(user);
+      ctx.res.cookie("gwagwalada_session", token, { ...getSessionCookieOptions(ctx.req), maxAge: 30 * 24 * 60 * 60 * 1000 });
+      return { user, completed: true };
     }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);

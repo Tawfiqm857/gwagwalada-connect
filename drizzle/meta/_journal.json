@@ -15,6 +15,13 @@
       "when": 1788892313150,
       "tag": "0001_illegal_nova",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1788892951818,
+      "tag": "0002_dapper_chronomancer",
+      "breakpoints": true
     }
   ]
 }

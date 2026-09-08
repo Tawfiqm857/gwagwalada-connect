@@ -8,7 +8,7 @@ export const LOCAL_SESSION_COOKIE = "gwagwalada_session";
 const SESSION_TTL = "30d";
 const secret = new TextEncoder().encode(ENV.cookieSecret || "gwagwalada-connect-development-secret");
 
-type LocalAccount = Pick<User, "id" | "openId" | "name" | "email" | "role" | "loginMethod" | "createdAt" | "updatedAt" | "lastSignedIn"> & { passwordHash: string };
+type LocalAccount = Pick<User, "id" | "openId" | "name" | "email" | "role" | "loginMethod" | "passwordHash" | "area" | "bio" | "interests" | "onboardingCompleted" | "createdAt" | "updatedAt" | "lastSignedIn"> & { passwordHash: string };
 const fallbackAccounts = new Map<string, LocalAccount>();
 let fallbackId = 1000;
 
@@ -37,6 +37,10 @@ export async function createLocalSession(user: User) {
     email: user.email,
     role: user.role,
     loginMethod: user.loginMethod,
+    area: user.area,
+    bio: user.bio,
+    interests: user.interests,
+    onboardingCompleted: user.onboardingCompleted,
   })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(String(user.id))
@@ -63,6 +67,10 @@ export async function getLocalSessionUser(req: Request): Promise<User | null> {
       email: typeof payload.email === "string" ? payload.email : null,
       loginMethod: typeof payload.loginMethod === "string" ? payload.loginMethod : "password",
       passwordHash: null,
+      area: typeof payload.area === "string" ? payload.area : null,
+      bio: typeof payload.bio === "string" ? payload.bio : null,
+      interests: typeof payload.interests === "string" ? payload.interests : null,
+      onboardingCompleted: Number(payload.onboardingCompleted ?? 0),
       role: payload.role === "admin" ? "admin" : "user",
       createdAt: new Date(Number(payload.iat ?? Date.now()) * 1000),
       updatedAt: new Date(Number(payload.iat ?? Date.now()) * 1000),
@@ -83,6 +91,10 @@ export function createFallbackAccount(input: { name: string; email: string; pass
     loginMethod: "password",
     role: "user",
     passwordHash: input.passwordHash,
+    area: null,
+    bio: null,
+    interests: null,
+    onboardingCompleted: 0,
     createdAt: now,
     updatedAt: now,
     lastSignedIn: now,
@@ -94,7 +106,16 @@ export function createFallbackAccount(input: { name: string; email: string; pass
 export function getFallbackAccount(email: string) {
   return fallbackAccounts.get(normalizeEmail(email));
 }
-
+export function updateFallbackProfile(openId: string, input: { area: string; bio: string; interests: string[] }) {
+  const account = Array.from(fallbackAccounts.values()).find((candidate) => candidate.openId === openId);
+  if (!account) return undefined;
+  account.area = input.area;
+  account.bio = input.bio;
+  account.interests = JSON.stringify(input.interests);
+  account.onboardingCompleted = 1;
+  account.updatedAt = new Date();
+  return account;
+}
 export function publicUser(account: LocalAccount): User {
   const { passwordHash: _passwordHash, ...user } = account;
   return { ...user, passwordHash: null };

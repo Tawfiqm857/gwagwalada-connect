@@ -29,7 +29,7 @@ export default function Auth() {
         : await loginMutation.mutateAsync({ email, password });
       utils.auth.me.setData(undefined, result.user);
       toast.success(mode === "register" ? "Your Gwagwalada Connect account is ready." : "Welcome back to the community.");
-      window.location.href = "/";
+      window.location.href = mode === "register" || !result.user.onboardingCompleted ? "/onboarding" : "/";
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "We couldn’t complete that request.";
       toast.error(message);

@@ -11,3 +11,4 @@ The updated desktop home preview shows the new Find people navigation entry inte
 
 The new auth route contains the intended login and registration controls. Browser inspection found a stray EOF token in the CSS that caused the desktop auth panel to stack below the artwork; the token was removed so the two-column desktop layout can render correctly.
 The corrected auth route now renders as a two-column desktop layout. Interactive browser verification confirmed the Sign in mode and Create account mode expose the expected email, password, and registration name fields, password visibility control, secure OAuth fallback, and visitor escape route.
+The authenticated onboarding preview renders a clear three-step flow. Step 1 shows the area selection grid, progress indicator, skip action, and a profile preview panel. The layout is balanced across the desktop split view and uses the existing Gwagwalada Connect visual system.
