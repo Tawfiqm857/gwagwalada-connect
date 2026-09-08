@@ -36,12 +36,19 @@ describe("Gwagwalada Connect feature contracts", () => {
     await expect(caller.community.createPost({ body: "A safe civic update" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
+  it("requires authentication for relationship management", async () => {
+    const caller = appRouter.createCaller(createContext());
+    await expect(caller.social.relationships()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.social.follow({ userId: "2", follow: true })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.social.friendRequest({ userId: "2", action: "send" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
   it("filters real people and returns the messaging contract", async () => {
     const caller = appRouter.createCaller(createContext({ id: 1, openId: "sample-user", email: "sample@example.com", name: "Sample User", loginMethod: "manus", role: "user", createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date() }));
     const people = await caller.social.people({ search: "zuba" });
-    const access = await caller.social.canMessage({ userId: "person-2" });
+    const access = await caller.social.canMessage({ userId: "2" });
     expect(people).toEqual([]);
-    expect(access.allowed).toBe(true);
-    expect(access.relationship).toBe("accepted");
+    expect(access.allowed).toBe(false);
+    expect(access.relationship).toBe("none");
   });
 });

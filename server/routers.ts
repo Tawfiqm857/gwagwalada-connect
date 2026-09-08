@@ -6,7 +6,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { createFallbackAccount, createLocalSession, getFallbackAccount, hashPassword, normalizeEmail, publicUser, updateFallbackProfile, verifyPassword } from "./auth-local";
-import { createCommunityPost, createLocalUser, createMarketplaceListing, getCommunityFeed, getMarketplaceListings, getPeopleDirectory, getUserByEmail, updateUserOnboarding } from "./db";
+import { createCommunityPost, createLocalUser, createMarketplaceListing, getCommunityFeed, getMarketplaceListings, getPeopleDirectory, getSocialGraph, getUserByEmail, getUserById, setFollow, updateFriendRequest, updateUserOnboarding } from "./db";
 
 /**
  * Production reads come from the database. Empty tables return empty arrays so
@@ -94,10 +94,29 @@ export const appRouter = router({
     certificate: protectedProcedure.input(z.object({ courseId: z.string() })).query(({ input, ctx }) => ({ eligible: true, courseId: input.courseId, holder: ctx.user.name ?? "Community learner", issuedAt: Date.now() })),
   }),
   social: router({
-    people: publicProcedure.input(z.object({ search: z.string().optional() }).optional()).query(({ input }) => getPeopleDirectory(input?.search)),
-    follow: protectedProcedure.input(z.object({ userId: z.string(), follow: z.boolean() })).mutation(({ input, ctx }) => ({ ...input, followerId: ctx.user.id, following: input.follow })),
-    friendRequest: protectedProcedure.input(z.object({ userId: z.string(), action: z.enum(["send", "accept", "decline", "cancel"]) })).mutation(({ input, ctx }) => ({ ...input, requesterId: ctx.user.id, status: input.action === "accept" ? "accepted" : input.action === "decline" || input.action === "cancel" ? "declined" : "pending" })),
-    canMessage: protectedProcedure.input(z.object({ userId: z.string() })).query(({ input, ctx }) => ({ userId: input.userId, requesterId: ctx.user.id, allowed: true, relationship: "accepted" as const })),
+    people: publicProcedure.input(z.object({ search: z.string().optional(), viewerId: z.number().int().positive().optional() }).optional()).query(({ input }) => getPeopleDirectory(input?.search, input?.viewerId)),
+    relationships: protectedProcedure.query(({ ctx }) => getSocialGraph(ctx.user.id)),
+    follow: protectedProcedure.input(z.object({ userId: z.string().regex(/^\d+$/), follow: z.boolean() })).mutation(async ({ input, ctx }) => {
+      const targetUserId = Number(input.userId);
+      if (targetUserId === ctx.user.id) throw new TRPCError({ code: "BAD_REQUEST", message: "You cannot follow your own profile." });
+      if (!await getUserById(targetUserId)) throw new TRPCError({ code: "NOT_FOUND", message: "That community profile no longer exists." });
+      const persisted = await setFollow(ctx.user.id, targetUserId, input.follow);
+      if (!persisted) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The database is not available. Your follow was not saved." });
+      return { userId: input.userId, following: input.follow };
+    }),
+    friendRequest: protectedProcedure.input(z.object({ userId: z.string().regex(/^\d+$/), action: z.enum(["send", "accept", "decline", "cancel"]) })).mutation(async ({ input, ctx }) => {
+      const targetUserId = Number(input.userId);
+      if (targetUserId === ctx.user.id) throw new TRPCError({ code: "BAD_REQUEST", message: "You cannot send a friend request to yourself." });
+      if (!await getUserById(targetUserId)) throw new TRPCError({ code: "NOT_FOUND", message: "That community profile no longer exists." });
+      const status = await updateFriendRequest(ctx.user.id, targetUserId, input.action);
+      if (status === undefined) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The database is not available. Your request was not saved." });
+      return { userId: input.userId, action: input.action, status };
+    }),
+    canMessage: protectedProcedure.input(z.object({ userId: z.string().regex(/^\d+$/) })).query(async ({ input, ctx }) => {
+      const graph = await getSocialGraph(ctx.user.id);
+      const relationship = graph.friendRequests.find((request) => request.userId === Number(input.userId));
+      return { userId: input.userId, requesterId: ctx.user.id, allowed: relationship?.status === "accepted", relationship: relationship?.status ?? "none" };
+    }),
   }),
   messaging: router({
     threads: protectedProcedure.query(() => []),

@@ -1,6 +1,6 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { communityPosts, InsertUser, marketplaceListings, users } from "../drizzle/schema";
+import { communityPosts, follows, friendRequests, InsertUser, marketplaceListings, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -95,6 +95,12 @@ export async function getUserByEmail(email: string) {
   const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
   return result.length > 0 ? result[0] : undefined;
 }
+export async function getUserById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return result[0];
+}
 
 export async function createLocalUser(input: { openId: string; name: string; email: string; passwordHash: string }) {
   const db = await getDb();
@@ -181,12 +187,12 @@ export async function createMarketplaceListing(input: { sellerId: number; title:
   return Number(result[0].insertId);
 }
 
-export async function getPeopleDirectory(search?: string) {
+export async function getPeopleDirectory(search?: string, viewerId?: number) {
   const db = await getDb();
   if (!db) return [];
   const rows = await db.select({ id: users.id, name: users.name, role: users.role, area: users.area, bio: users.bio }).from(users).orderBy(desc(users.createdAt)).limit(100);
   const query = search?.toLowerCase() ?? "";
-  return rows.filter((row) => !query || `${row.name ?? ""} ${row.role} ${row.area ?? ""} ${row.bio ?? ""}`.toLowerCase().includes(query)).map((row) => ({
+  return rows.filter((row) => row.id !== viewerId && (!query || `${row.name ?? ""} ${row.role} ${row.area ?? ""} ${row.bio ?? ""}`.toLowerCase().includes(query))).map((row) => ({
     id: String(row.id),
     name: row.name ?? "Community member",
     role: row.role === "admin" ? "GEM Executive" : "Resident",
@@ -194,6 +200,64 @@ export async function getPeopleDirectory(search?: string) {
     bio: row.bio ?? "This community member has not added an introduction yet.",
     mutuals: 0,
   }));
+}
+
+export async function getSocialGraph(userId: number) {
+  const db = await getDb();
+  if (!db) return { followingIds: [] as number[], friendRequests: [] as { userId: number; status: "pending" | "accepted" | "declined"; direction: "incoming" | "outgoing" }[] };
+  const [followingRows, requestRows] = await Promise.all([
+    db.select({ followingId: follows.followingId }).from(follows).where(eq(follows.followerId, userId)),
+    db.select().from(friendRequests).where(or(eq(friendRequests.requesterId, userId), eq(friendRequests.addresseeId, userId))),
+  ]);
+  return {
+    followingIds: followingRows.map((row) => row.followingId),
+    friendRequests: requestRows.map((row) => ({
+      userId: row.requesterId === userId ? row.addresseeId : row.requesterId,
+      status: row.status,
+      direction: row.addresseeId === userId ? "incoming" as const : "outgoing" as const,
+    })),
+  };
+}
+
+export async function setFollow(userId: number, targetUserId: number, shouldFollow: boolean) {
+  const db = await getDb();
+  if (!db) return false;
+  if (shouldFollow) {
+    await db.insert(follows).values({ followerId: userId, followingId: targetUserId }).onDuplicateKeyUpdate({ set: { followingId: targetUserId } });
+  } else {
+    await db.delete(follows).where(and(eq(follows.followerId, userId), eq(follows.followingId, targetUserId)));
+  }
+  return true;
+}
+
+export async function updateFriendRequest(userId: number, targetUserId: number, action: "send" | "accept" | "decline" | "cancel") {
+  const db = await getDb();
+  if (!db) return undefined;
+  const outgoing = and(eq(friendRequests.requesterId, userId), eq(friendRequests.addresseeId, targetUserId));
+  const incoming = and(eq(friendRequests.requesterId, targetUserId), eq(friendRequests.addresseeId, userId));
+  const existing = await db.select().from(friendRequests).where(or(outgoing, incoming)).limit(1);
+  const current = existing[0];
+  if (action === "send") {
+    if (current?.status === "accepted") return "accepted" as const;
+    if (current?.status === "pending") return "pending" as const;
+    if (current) {
+      await db.update(friendRequests).set({ requesterId: userId, addresseeId: targetUserId, status: "pending", updatedAt: new Date() }).where(eq(friendRequests.id, current.id));
+    } else {
+      await db.insert(friendRequests).values({ requesterId: userId, addresseeId: targetUserId, status: "pending" });
+    }
+    return "pending" as const;
+  }
+  if (!current || current.status !== "pending") return current?.status ?? "none" as const;
+  const isIncoming = current.addresseeId === userId;
+  if (action === "accept" && isIncoming) {
+    await db.update(friendRequests).set({ status: "accepted", updatedAt: new Date() }).where(eq(friendRequests.id, current.id));
+    return "accepted" as const;
+  }
+  if ((action === "decline" && isIncoming) || (action === "cancel" && !isIncoming)) {
+    await db.update(friendRequests).set({ status: "declined", updatedAt: new Date() }).where(eq(friendRequests.id, current.id));
+    return "declined" as const;
+  }
+  return current.status;
 }
 
 // TODO: add feature queries here as your schema grows.
