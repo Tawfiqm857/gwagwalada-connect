@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
+import { TRPCError } from "@trpc/server";
 import { COOKIE_NAME } from "@shared/const";
 import {
   mockConversations,
@@ -10,6 +12,8 @@ import {
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { createFallbackAccount, createLocalSession, getFallbackAccount, hashPassword, normalizeEmail, publicUser, verifyPassword } from "./auth-local";
+import { createLocalUser, getUserByEmail } from "./db";
 
 /**
  * Feature routers intentionally return mock data when the database is empty or
@@ -21,9 +25,38 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
+    register: publicProcedure.input(z.object({ name: z.string().trim().min(2).max(80), email: z.string().email().max(320), password: z.string().min(8).max(128) })).mutation(async ({ input, ctx }) => {
+      const email = normalizeEmail(input.email);
+      const existing = await getUserByEmail(email);
+      if (existing || getFallbackAccount(email)) throw new TRPCError({ code: "CONFLICT", message: "An account with this email already exists." });
+      const passwordHash = hashPassword(input.password);
+      const openId = `local_${randomUUID().replaceAll("-", "")}`;
+      const databaseUser = await createLocalUser({ openId, name: input.name, email, passwordHash });
+      const user = databaseUser ?? publicUser(createFallbackAccount({ name: input.name, email, passwordHash }));
+      const token = await createLocalSession(user);
+      ctx.res.cookie("gwagwalada_session", token, { ...getSessionCookieOptions(ctx.req), maxAge: 30 * 24 * 60 * 60 * 1000 });
+      return { user, created: true };
+    }),
+    login: publicProcedure.input(z.object({ email: z.string().email().max(320), password: z.string().min(1).max(128) })).mutation(async ({ input, ctx }) => {
+      const email = normalizeEmail(input.email);
+      const databaseUser = await getUserByEmail(email);
+      const fallbackUser = getFallbackAccount(email);
+      if (databaseUser?.passwordHash) {
+        if (!verifyPassword(input.password, databaseUser.passwordHash)) throw new TRPCError({ code: "UNAUTHORIZED", message: "Email or password is incorrect." });
+        const token = await createLocalSession(databaseUser);
+        ctx.res.cookie("gwagwalada_session", token, { ...getSessionCookieOptions(ctx.req), maxAge: 30 * 24 * 60 * 60 * 1000 });
+        return { user: databaseUser, loggedIn: true };
+      }
+      if (!fallbackUser?.passwordHash || !verifyPassword(input.password, fallbackUser.passwordHash)) throw new TRPCError({ code: "UNAUTHORIZED", message: "Email or password is incorrect." });
+      const user = publicUser(fallbackUser);
+      const token = await createLocalSession(user);
+      ctx.res.cookie("gwagwalada_session", token, { ...getSessionCookieOptions(ctx.req), maxAge: 30 * 24 * 60 * 60 * 1000 });
+      return { user, loggedIn: true };
+    }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      ctx.res.clearCookie("gwagwalada_session", { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
   }),

@@ -89,4 +89,26 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
+export async function getUserByEmail(email: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function createLocalUser(input: { openId: string; name: string; email: string; passwordHash: string }) {
+  const db = await getDb();
+  if (!db) return undefined;
+  await db.insert(users).values({
+    openId: input.openId,
+    name: input.name,
+    email: input.email,
+    loginMethod: "password",
+    passwordHash: input.passwordHash,
+    role: "user",
+    lastSignedIn: new Date(),
+  });
+  return getUserByOpenId(input.openId);
+}
+
 // TODO: add feature queries here as your schema grows.
