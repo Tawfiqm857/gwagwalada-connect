@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { communityPosts, InsertUser, marketplaceListings, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -121,6 +121,79 @@ export async function updateUserOnboarding(openId: string, input: { area: string
     updatedAt: new Date(),
   }).where(eq(users.openId, openId));
   return getUserByOpenId(openId);
+}
+
+export async function getCommunityFeed() {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select({
+    id: communityPosts.id,
+    author: users.name,
+    role: users.role,
+    body: communityPosts.body,
+    mediaUrl: communityPosts.mediaUrl,
+    likes: communityPosts.likesCount,
+    comments: communityPosts.commentsCount,
+    createdAt: communityPosts.createdAt,
+  }).from(communityPosts).leftJoin(users, eq(communityPosts.authorId, users.id)).orderBy(desc(communityPosts.createdAt)).limit(50);
+  return rows.map((row) => ({
+    ...row,
+    author: row.author ?? "Community member",
+    role: row.role === "admin" ? "GEM Executive" : "Resident",
+    createdAt: row.createdAt.getTime(),
+  }));
+}
+
+export async function createCommunityPost(input: { authorId: number; body: string; mediaUrl?: string }) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.insert(communityPosts).values(input);
+  const id = Number(result[0].insertId);
+  const rows = await db.select().from(communityPosts).where(eq(communityPosts.id, id)).limit(1);
+  return rows[0];
+}
+
+export async function getMarketplaceListings(input?: { category?: string; search?: string }) {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select({
+    id: marketplaceListings.id,
+    title: marketplaceListings.title,
+    seller: users.name,
+    category: marketplaceListings.category,
+    price: marketplaceListings.price,
+    location: marketplaceListings.location,
+    image: marketplaceListings.imageUrl,
+    verified: marketplaceListings.verified,
+  }).from(marketplaceListings).leftJoin(users, eq(marketplaceListings.sellerId, users.id)).orderBy(desc(marketplaceListings.createdAt));
+  const search = input?.search?.toLowerCase() ?? "";
+  return rows.filter((row) => {
+    const categoryMatch = !input?.category || input.category === "All" || row.category === input.category;
+    const searchMatch = !search || `${row.title} ${row.seller ?? ""} ${row.category}`.toLowerCase().includes(search);
+    return categoryMatch && searchMatch;
+  }).map((row) => ({ ...row, seller: row.seller ?? "Community seller", location: row.location ?? "Gwagwalada", image: row.image ?? undefined, verified: Boolean(row.verified), rating: "—" }));
+}
+
+export async function createMarketplaceListing(input: { sellerId: number; title: string; category: "Tech" | "Handwork" | "Commerce" | "General Labor"; price: string; location?: string }) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.insert(marketplaceListings).values(input);
+  return Number(result[0].insertId);
+}
+
+export async function getPeopleDirectory(search?: string) {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select({ id: users.id, name: users.name, role: users.role, area: users.area, bio: users.bio }).from(users).orderBy(desc(users.createdAt)).limit(100);
+  const query = search?.toLowerCase() ?? "";
+  return rows.filter((row) => !query || `${row.name ?? ""} ${row.role} ${row.area ?? ""} ${row.bio ?? ""}`.toLowerCase().includes(query)).map((row) => ({
+    id: String(row.id),
+    name: row.name ?? "Community member",
+    role: row.role === "admin" ? "GEM Executive" : "Resident",
+    area: row.area ?? "Gwagwalada",
+    bio: row.bio ?? "This community member has not added an introduction yet.",
+    mutuals: 0,
+  }));
 }
 
 // TODO: add feature queries here as your schema grows.

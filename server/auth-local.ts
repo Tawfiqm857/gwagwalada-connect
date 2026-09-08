@@ -116,7 +116,7 @@ export function updateFallbackProfile(openId: string, input: { area: string; bio
   account.updatedAt = new Date();
   return account;
 }
-export function publicUser(account: LocalAccount): User {
+export function publicUser(account: User): User {
   const { passwordHash: _passwordHash, ...user } = account;
   return { ...user, passwordHash: null };
 }

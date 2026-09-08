@@ -2,24 +2,15 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { COOKIE_NAME } from "@shared/const";
-import {
-  mockConversations,
-  mockCourses,
-  mockListings,
-  mockNotifications,
-  mockPosts,
-} from "@shared/app-data";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { createFallbackAccount, createLocalSession, getFallbackAccount, hashPassword, normalizeEmail, publicUser, updateFallbackProfile, verifyPassword } from "./auth-local";
-import { createLocalUser, getUserByEmail, updateUserOnboarding } from "./db";
+import { createCommunityPost, createLocalUser, createMarketplaceListing, getCommunityFeed, getMarketplaceListings, getPeopleDirectory, getUserByEmail, updateUserOnboarding } from "./db";
 
 /**
- * Feature routers intentionally return mock data when the database is empty or
- * unavailable. Replacing these catalog reads with Drizzle/Supabase queries does
- * not require any UI contract changes. Mutations are protected and validate
- * their payloads before a persistence adapter is called.
+ * Production reads come from the database. Empty tables return empty arrays so
+ * the UI can show an honest empty state instead of fabricated community activity.
  */
 export const appRouter = router({
   system: systemRouter,
@@ -69,25 +60,17 @@ export const appRouter = router({
     }),
   }),
   community: router({
-    feed: publicProcedure.query(() => mockPosts),
-    createPost: protectedProcedure.input(z.object({ body: z.string().min(1).max(5000), mediaUrl: z.string().url().optional() })).mutation(({ input, ctx }) => ({
-      id: `post-${Date.now()}`,
-      author: ctx.user.name ?? "Community member",
-      body: input.body,
-      mediaUrl: input.mediaUrl,
-      likes: 0,
-      comments: 0,
-      createdAt: Date.now(),
-    })),
+    feed: publicProcedure.query(() => getCommunityFeed()),
+    createPost: protectedProcedure.input(z.object({ body: z.string().trim().min(1).max(5000), mediaUrl: z.string().url().optional() })).mutation(async ({ input, ctx }) => {
+      const post = await createCommunityPost({ authorId: ctx.user.id, ...input });
+      if (!post) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The database is not available. Your update was not published." });
+      return { id: post.id, created: true };
+    }),
     toggleLike: protectedProcedure.input(z.object({ postId: z.string() })).mutation(({ input }) => ({ postId: input.postId, liked: true })),
     report: protectedProcedure.input(z.object({ postId: z.string(), reason: z.string().min(5).max(300) })).mutation(({ input }) => ({ accepted: true, postId: input.postId, auditLogged: true, reason: input.reason })),
   }),
   civic: router({
-    gallery: publicProcedure.query(() => ({ projects: [
-      { id: "project-1", name: "Kuje Road borehole rehabilitation", status: "in_progress", percent: 80, updates: 12 },
-      { id: "project-2", name: "Tudun Wada youth hub", status: "verified_complete", percent: 100, updates: 8 },
-      { id: "project-3", name: "Dagiri drainage clearance", status: "verified_complete", percent: 100, updates: 16 },
-    ] })),
+    gallery: publicProcedure.query(() => ({ projects: [] })),
     submitVerification: protectedProcedure.input(z.object({ projectId: z.string(), mediaUrl: z.string().url(), anonymous: z.boolean(), note: z.string().max(1000).optional() })).mutation(({ input, ctx }) => ({
       accepted: true,
       publicIdentity: input.anonymous ? "Anonymous resident" : ctx.user.name ?? "Verified resident",
@@ -97,41 +80,28 @@ export const appRouter = router({
     })),
   }),
   marketplace: router({
-    listings: publicProcedure.input(z.object({ category: z.string().optional(), search: z.string().optional() }).optional()).query(({ input }) => mockListings.filter((item) => {
-      const categoryMatch = !input?.category || input.category === "All" || item.category === input.category;
-      const search = input?.search?.toLowerCase() ?? "";
-      return categoryMatch && (!search || `${item.title} ${item.seller} ${item.category}`.toLowerCase().includes(search));
-    })),
-    createListing: protectedProcedure.input(z.object({ title: z.string().min(3).max(120), category: z.enum(["Tech", "Handwork", "Commerce", "General Labor"]), price: z.string().min(1).max(80) })).mutation(({ input, ctx }) => ({
-      id: `listing-${Date.now()}`,
-      seller: ctx.user.name ?? "Community seller",
-      ...input,
-    })),
+    listings: publicProcedure.input(z.object({ category: z.string().optional(), search: z.string().optional() }).optional()).query(({ input }) => getMarketplaceListings(input)),
+    createListing: protectedProcedure.input(z.object({ title: z.string().trim().min(3).max(120), category: z.enum(["Tech", "Handwork", "Commerce", "General Labor"]), price: z.string().trim().min(1).max(80), location: z.string().trim().max(120).optional() })).mutation(async ({ input, ctx }) => {
+      const id = await createMarketplaceListing({ sellerId: ctx.user.id, ...input });
+      if (!id) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The database is not available. Your listing was not created." });
+      return { id, created: true };
+    }),
   }),
   classroom: router({
-    courses: publicProcedure.query(() => mockCourses),
+    courses: publicProcedure.query(() => []),
     enroll: protectedProcedure.input(z.object({ courseId: z.string() })).mutation(({ input, ctx }) => ({ enrolled: true, courseId: input.courseId, userId: ctx.user.id })),
     completeModule: protectedProcedure.input(z.object({ courseId: z.string(), moduleId: z.string() })).mutation(({ input }) => ({ completed: true, ...input })),
     certificate: protectedProcedure.input(z.object({ courseId: z.string() })).query(({ input, ctx }) => ({ eligible: true, courseId: input.courseId, holder: ctx.user.name ?? "Community learner", issuedAt: Date.now() })),
   }),
   social: router({
-    people: publicProcedure.input(z.object({ search: z.string().optional() }).optional()).query(({ input }) => {
-      const directory = [
-        { id: "person-1", name: "Aisha Bello", role: "GEM Executive", area: "Tudun Wada", mutuals: 12 },
-        { id: "person-2", name: "Sadiq Ibrahim", role: "Verified Resident", area: "Zuba", mutuals: 8 },
-        { id: "person-3", name: "Naza Digital", role: "Verified Business", area: "Gwagwalada Central", mutuals: 4 },
-        { id: "person-4", name: "Maryam Yusuf", role: "Verified Resident", area: "Dagiri", mutuals: 16 },
-      ];
-      const search = input?.search?.toLowerCase() ?? "";
-      return directory.filter((person) => !search || `${person.name} ${person.role} ${person.area}`.toLowerCase().includes(search));
-    }),
+    people: publicProcedure.input(z.object({ search: z.string().optional() }).optional()).query(({ input }) => getPeopleDirectory(input?.search)),
     follow: protectedProcedure.input(z.object({ userId: z.string(), follow: z.boolean() })).mutation(({ input, ctx }) => ({ ...input, followerId: ctx.user.id, following: input.follow })),
     friendRequest: protectedProcedure.input(z.object({ userId: z.string(), action: z.enum(["send", "accept", "decline", "cancel"]) })).mutation(({ input, ctx }) => ({ ...input, requesterId: ctx.user.id, status: input.action === "accept" ? "accepted" : input.action === "decline" || input.action === "cancel" ? "declined" : "pending" })),
     canMessage: protectedProcedure.input(z.object({ userId: z.string() })).query(({ input, ctx }) => ({ userId: input.userId, requesterId: ctx.user.id, allowed: true, relationship: "accepted" as const })),
   }),
   messaging: router({
-    threads: protectedProcedure.query(() => mockConversations),
-    notifications: protectedProcedure.query(() => mockNotifications),
+    threads: protectedProcedure.query(() => []),
+    notifications: protectedProcedure.query(() => []),
     send: protectedProcedure.input(z.object({ threadId: z.string(), body: z.string().min(1).max(2000) })).mutation(({ input, ctx }) => ({ sent: true, senderId: ctx.user.id, ...input, createdAt: Date.now() })),
   }),
 });

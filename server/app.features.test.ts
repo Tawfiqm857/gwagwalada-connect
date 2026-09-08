@@ -11,26 +11,24 @@ function createContext(user: TrpcContext["user"] = null): TrpcContext {
 }
 
 describe("Gwagwalada Connect feature contracts", () => {
-  it("serves civic feed data in fallback mode", async () => {
+  it("serves the production civic feed contract", async () => {
     const caller = appRouter.createCaller(createContext());
     const feed = await caller.community.feed();
-    expect(feed.length).toBeGreaterThan(0);
-    expect(feed[0]).toHaveProperty("badge");
+    expect(Array.isArray(feed)).toBe(true);
   });
 
-  it("filters marketplace listings by category and search", async () => {
+  it("filters the production marketplace catalog by category and search", async () => {
     const caller = appRouter.createCaller(createContext());
     const listings = await caller.marketplace.listings({ category: "Tech", search: "social" });
-    expect(listings).toHaveLength(1);
-    expect(listings[0]?.seller).toBe("Naza Digital");
+    expect(listings).toEqual([]);
   });
 
-  it("exposes course progress and project verification catalogs", async () => {
+  it("exposes empty course and project catalogs until content is published", async () => {
     const caller = appRouter.createCaller(createContext());
     const courses = await caller.classroom.courses();
     const gallery = await caller.civic.gallery();
-    expect(courses).toHaveLength(3);
-    expect(gallery.projects.some((project) => project.percent === 100)).toBe(true);
+    expect(courses).toEqual([]);
+    expect(gallery.projects).toEqual([]);
   });
 
   it("requires authentication for creating a community post", async () => {
@@ -38,11 +36,11 @@ describe("Gwagwalada Connect feature contracts", () => {
     await expect(caller.community.createPost({ body: "A safe civic update" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
-  it("filters people and returns an accepted-contact messaging contract", async () => {
+  it("filters real people and returns the messaging contract", async () => {
     const caller = appRouter.createCaller(createContext({ id: 1, openId: "sample-user", email: "sample@example.com", name: "Sample User", loginMethod: "manus", role: "user", createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date() }));
     const people = await caller.social.people({ search: "zuba" });
     const access = await caller.social.canMessage({ userId: "person-2" });
-    expect(people).toHaveLength(1);
+    expect(people).toEqual([]);
     expect(access.allowed).toBe(true);
     expect(access.relationship).toBe("accepted");
   });
